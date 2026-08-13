@@ -1,0 +1,4 @@
+# Allow the logged-in user to talk to the VideoMic NTG HID interface
+# (RØDE Central/Connect use this for firmware and hardware-switch state).
+# Install: sudo cp 99-rode-ntg.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+KERNEL=="hidraw*", ATTRS{idVendor}=="19f7", ATTRS{idProduct}=="001a", MODE="0660", GROUP="audio"

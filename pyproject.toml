@@ -1,0 +1,19 @@
+[project]
+name = "ntg-console"
+version = "0.1.0"
+description = "Linux mixer and virtual mic for the RØDE VideoMic NTG"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Matt Shearing" }]
+dependencies = ["PyQt6", "numpy", "sounddevice"]
+
+[project.scripts]
+ntg-console = "ntg_console.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ntg_console*"]

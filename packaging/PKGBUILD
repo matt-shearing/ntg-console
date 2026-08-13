@@ -1,0 +1,25 @@
+# Maintainer: Matt Shearing <matt@block-sense.io>
+pkgname=ntg-console
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Linux mixer and virtual mic for the RØDE VideoMic NTG'
+arch=('any')
+url='https://github.com/matt-shearing/ntg-console'
+license=('MIT')
+depends=(
+  'python'
+  'python-pyqt6'
+  'python-numpy'
+  'python-sounddevice'
+  'pipewire-pulse'
+)
+optdepends=(
+  'rnnoise: RNNOISE suppressor key'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/matt-shearing/ntg-console/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir/ntg-console-$pkgver"
+  make DESTDIR="$pkgdir" PREFIX=/usr install
+}

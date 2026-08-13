@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+datadir = Path("@DATADIR@")
+if datadir.is_dir():
+    sys.path.insert(0, str(datadir))
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from ntg_console.app import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

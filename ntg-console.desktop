@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=NTG Console
+Comment=Mixer, processors, and virtual mic for the RØDE VideoMic NTG
+Exec=/home/contra/dev/rode-ntg/ntg-console
+Icon=ntg-console
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupNotify=true
+StartupWMClass=ntg-console

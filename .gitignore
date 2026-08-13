@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.wav
+last-report.json
+last-verdict.txt
+.idea/
+.vscode/
+*.swp
+.DS_Store
+/icons/ntg-console-512.png
