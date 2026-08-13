@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -23,12 +22,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from . import device, virtual
-from .analyze import DATA_DIR, analyze, save_report, save_wav
+from . import device
 from .dsp import lin_to_db
-from .engine import Engine
-
-CONFIG = Path.home() / ".config" / "ntg-console" / "settings.json"
+from .ipc import Client, ensure_daemon
+from .settings import load as load_settings, save as save_settings
 
 PRESETS = {
     "calls": {
@@ -146,11 +143,10 @@ class Console(QMainWindow):
         super().__init__()
         self.setWindowTitle("NTG Console")
         self.resize(920, 620)
-        self.engine = Engine()
-        self.virtual = None
-        self.prev_default = None
+        self.client = Client()
         self.info = device.poll()
         self._building = True
+        self._meters = {}
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -323,7 +319,10 @@ class Console(QMainWindow):
         pre.addWidget(self.rec_btn)
         right.addLayout(pre)
 
-        self.status = QLabel("Processors feed a virtual mic named NTG Console. Point Zoom at that.")
+        self.status = QLabel(
+            "Engine runs in the background. Close this window — NTG_Console stays. "
+            "Pick it in Zoom when you want it; this app will not steal your headset."
+        )
         self.status.setObjectName("status")
         self.status.setWordWrap(True)
         right.addWidget(self.status)
@@ -420,7 +419,8 @@ class Console(QMainWindow):
         self._building = False
         self._push()
         self.status.setText(
-            f"Preset {name} loaded. In the sound menu pick input “NTG_Console” — not the raw RØDE device."
+            f"Preset {name} loaded. Pick input NTG_Console in an app when you want it — "
+            "we will not change your default headset."
         )
 
     def _hpf(self) -> int:
@@ -433,23 +433,28 @@ class Console(QMainWindow):
         if self._building:
             return
         self.fader_lbl.setText(f"{self.fader.value():+d} dB")
-        self.engine.update(
-            hpf_hz=self._hpf(),
-            pad=self.pad_btn.isChecked(),
-            hf_boost=self.hf_btn.isChecked(),
-            suppress=self.suppress_btn.isChecked(),
-            gate=self.gate_btn.isChecked(),
-            gate_threshold_db=float(self.gate_s.value()),
-            comp=self.comp_btn.isChecked(),
-            comp_amount=self.comp_s.value() / 100.0,
-            bottom=self.bottom_btn.isChecked(),
-            bottom_amount=self.bottom_s.value() / 100.0,
-            excite=self.excite_btn.isChecked(),
-            excite_amount=self.excite_s.value() / 100.0,
-            fader_db=float(self.fader.value()),
-            mute=self.mute_btn.isChecked(),
-        )
-        self._save()
+        patch = {
+            "hpf_hz": self._hpf(),
+            "pad": self.pad_btn.isChecked(),
+            "hf_boost": self.hf_btn.isChecked(),
+            "suppress": self.suppress_btn.isChecked(),
+            "gate": self.gate_btn.isChecked(),
+            "gate_threshold_db": float(self.gate_s.value()),
+            "comp": self.comp_btn.isChecked(),
+            "comp_amount": self.comp_s.value() / 100.0,
+            "bottom": self.bottom_btn.isChecked(),
+            "bottom_amount": self.bottom_s.value() / 100.0,
+            "excite": self.excite_btn.isChecked(),
+            "excite_amount": self.excite_s.value() / 100.0,
+            "fader_db": float(self.fader.value()),
+            "mute": self.mute_btn.isChecked(),
+            "lock_usb": self.lock_btn.isChecked(),
+        }
+        save_settings(patch)
+        try:
+            self.client.request({"cmd": "set", "settings": patch})
+        except OSError:
+            self.status.setText("Background engine is not running yet.")
 
     def _on_lock(self, on: bool) -> None:
         self.usb_s.setEnabled(not on)
@@ -471,18 +476,18 @@ class Console(QMainWindow):
         device.set_direct_monitor(on)
 
     def _start_audio(self) -> None:
-        info = device.poll()
-        self.prev_default = info.default_source
-        self.virtual = virtual.ensure()
+        # Start or attach to the background engine. Do not touch default devices.
+        self.client = ensure_daemon()
+        if not self.client.alive():
+            self.status.setText("Could not start the background engine.")
+            return
         if self.lock_btn.isChecked():
             device.set_usb_gain_db(0)
-        self.engine.start(info.source_name, self.virtual.sink_name)
-        virtual.set_default_source(self.virtual.source_name)
+        self._push()
 
     def _refresh_device(self) -> None:
         info = device.poll()
         self.info = info
-        virtual.relink()
         if info.connected:
             self.dev_lbl.setText(
                 f"RØDE VideoMic NTG  ·  {info.serial}  ·  USB {info.firmware}  ·  "
@@ -492,72 +497,65 @@ class Console(QMainWindow):
             self.dev_lbl.setText("Microphone not found — plug the NTG in over USB-C.")
 
     def _tick(self) -> None:
-        m = self.engine.meters
-        self.meter_in.set_levels(lin_to_db(m.in_rms), lin_to_db(m.in_peak))
-        self.meter_out.set_levels(lin_to_db(m.out_rms), lin_to_db(m.out_peak))
+        try:
+            m = self.client.request({"cmd": "meters"}, timeout=0.4)
+        except OSError:
+            self.tally.set_on(False)
+            return
+        if not m.get("ok"):
+            return
+        self.meter_in.set_levels(m.get("in_rms_db", -90), m.get("in_peak_db", -90))
+        self.meter_out.set_levels(m.get("out_rms_db", -90), m.get("out_peak_db", -90))
         self.peak_lbl.setText(
-            f"IN  {lin_to_db(m.in_peak):6.1f} dB     OUT  {lin_to_db(m.out_peak):6.1f} dB"
+            f"IN  {m.get('in_peak_db', -90):6.1f} dB     OUT  {m.get('out_peak_db', -90):6.1f} dB"
         )
-        self.tally.set_on(m.gate_open and not self.mute_btn.isChecked() and m.running)
-        if m.error and "xrun" not in m.error:
-            self.status.setText(f"Engine: {m.error}")
+        self.tally.set_on(
+            bool(m.get("gate_open"))
+            and not self.mute_btn.isChecked()
+            and bool(m.get("running"))
+        )
+        err = m.get("error") or ""
+        if err and "xrun" not in err:
+            self.status.setText(f"Engine: {err}")
 
     def _toggle_rec(self, on: bool) -> None:
-        if on:
-            self.engine.start_record()
-            self.rec_btn.setText("STOP")
-            self.status.setText("Recording processed output…")
-        else:
-            samples = self.engine.stop_record()
-            self.rec_btn.setText("RECORD")
-            wav = DATA_DIR / "take.wav"
-            save_wav(wav, samples, 48000)
-            result = analyze(samples, 48000, wav)
-            save_report(result)
-            self.status.setText(f"{result.verdict}  ·  saved {wav}")
+        try:
+            if on:
+                self.client.request({"cmd": "record_start"})
+                self.rec_btn.setText("STOP")
+                self.status.setText("Recording processed output…")
+            else:
+                reply = self.client.request({"cmd": "record_stop"}, timeout=5.0)
+                self.rec_btn.setText("RECORD")
+                self.status.setText(
+                    f"{reply.get('verdict', 'saved')}  ·  {reply.get('wav', '')}"
+                )
+        except OSError:
+            self.status.setText("Background engine is not running.")
+            self.rec_btn.setChecked(False)
 
     def _run_test(self) -> None:
         self.status.setText("Recording 12s processed take — stay quiet 4s, then talk 8s.")
         self.test_btn.setEnabled(False)
-        self.engine.start_record()
+        try:
+            self.client.request({"cmd": "record_start"})
+        except OSError:
+            self.status.setText("Background engine is not running.")
+            self.test_btn.setEnabled(True)
+            return
         QTimer.singleShot(12000, self._finish_test)
 
     def _finish_test(self) -> None:
-        samples = self.engine.stop_record()
-        wav = DATA_DIR / "last-test.wav"
-        save_wav(wav, samples, 48000)
-        result = analyze(samples, 48000, wav)
-        save_report(result)
-        self.status.setText(result.verdict + "  ·  " + " ".join(result.notes))
+        try:
+            reply = self.client.request({"cmd": "record_stop"}, timeout=5.0)
+            notes = reply.get("notes") or []
+            self.status.setText(str(reply.get("verdict", "done")) + "  ·  " + " ".join(notes))
+        except OSError:
+            self.status.setText("Background engine is not running.")
         self.test_btn.setEnabled(True)
 
-    def _save(self) -> None:
-        CONFIG.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "hpf_hz": self._hpf(),
-            "pad": self.pad_btn.isChecked(),
-            "hf_boost": self.hf_btn.isChecked(),
-            "suppress": self.suppress_btn.isChecked(),
-            "gate": self.gate_btn.isChecked(),
-            "gate_threshold_db": self.gate_s.value(),
-            "comp": self.comp_btn.isChecked(),
-            "comp_amount": self.comp_s.value() / 100.0,
-            "bottom": self.bottom_btn.isChecked(),
-            "bottom_amount": self.bottom_s.value() / 100.0,
-            "excite": self.excite_btn.isChecked(),
-            "excite_amount": self.excite_s.value() / 100.0,
-            "fader_db": self.fader.value(),
-            "lock_usb": self.lock_btn.isChecked(),
-        }
-        CONFIG.write_text(json.dumps(data, indent=2) + "\n")
-
     def _load(self) -> None:
-        if not CONFIG.exists():
-            return
-        try:
-            data = json.loads(CONFIG.read_text())
-        except json.JSONDecodeError:
-            return
+        data = load_settings()
         self._building = True
         hz = int(data.get("hpf_hz", 75))
         if hz in self.hpf_btns:
@@ -579,10 +577,8 @@ class Console(QMainWindow):
         self._push()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        self.engine.stop()
-        if self.prev_default:
-            virtual.set_default_source(self.prev_default)
-        virtual.unload()
+        # Leave the background engine and NTG_Console device running.
+        # Do not change the default source or sink.
         event.accept()
 
 

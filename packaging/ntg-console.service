@@ -1,0 +1,16 @@
+[Unit]
+Description=NTG Console audio engine (VideoMic NTG virtual mic)
+Documentation=https://github.com/matt-shearing/ntg-console
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/ntg-console daemon
+Restart=on-failure
+RestartSec=2
+# Never claim default source/sink — the user picks NTG_Console when they want it.
+
+[Install]
+WantedBy=default.target

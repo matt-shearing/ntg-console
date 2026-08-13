@@ -41,6 +41,15 @@ python3 ntg-console
 
 Needs: Python 3.11+, PyQt6, numpy, python-sounddevice, PipeWire / `pactl` / `pw-link`. Optional: `librnnoise` (already on most Arch boxes) for the RNNOISE key.
 
+The audio engine is a **user systemd service**. It keeps the `NTG_Console` virtual mic alive after you close the window, and it does **not** steal your default headset. Pick `NTG_Console` in Zoom when you want it.
+
+```bash
+systemctl --user enable --now ntg-console.service   # start at login
+systemctl --user status ntg-console.service
+```
+
+`./install.sh` enables the service. The GUI is only a control surface.
+
 ## Use it
 
 1. Plug the VideoMic NTG in over USB-C. Foam windshield on.
