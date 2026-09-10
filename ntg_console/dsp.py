@@ -98,6 +98,19 @@ def lin_to_db(x: float) -> float:
     return 20.0 * math.log10(max(float(x), 1e-12))
 
 
+def safety_channel_db(left_rms: float, right_rms: float) -> float:
+    """How much louder the left (main) capsule is than the right, in dB."""
+    return lin_to_db(left_rms) - lin_to_db(right_rms)
+
+
+def safety_channel_likely(left_rms: float, right_rms: float) -> bool:
+    """True when the hardware safety channel looks engaged (right ≈ −20 dB)."""
+    if lin_to_db(left_rms) < -50.0:
+        return False
+    delta = safety_channel_db(left_rms, right_rms)
+    return 14.0 <= delta <= 28.0
+
+
 class Biquad:
     def __init__(self) -> None:
         self.b0 = 1.0
@@ -217,10 +230,14 @@ class VoiceChain:
             mono = self.rnnoise.process(mono)
 
         peak = float(np.max(np.abs(mono))) + 1e-12
-        atk = 1.0 - math.exp(-1.0 / (0.004 * self.sr))
-        rel = 1.0 - math.exp(-1.0 / (0.12 * self.sr))
-        coeff = atk if peak > self.env else rel
-        self.env += coeff * (peak - self.env)
+        n = max(len(mono), 1)
+
+        def coeff(seconds: float) -> float:
+            return 1.0 - math.exp(-n / (seconds * self.sr))
+
+        atk = coeff(0.004)
+        rel = coeff(0.12)
+        self.env += (atk if peak > self.env else rel) * (peak - self.env)
 
         gain = 1.0
         if s.gate:
@@ -229,12 +246,12 @@ class VoiceChain:
             if self.env > thresh:
                 target = 1.0
             elif self.env < thresh * 0.16:
-                target = db_to_lin(-18.0)
+                # Close 12 dB, not 18 — a hard mute on a shotgun sounds like
+                # the pattern is switching, and Chromium AGC then hunts.
+                target = db_to_lin(-12.0)
             else:
                 target = self.gr
-            g_atk = 1.0 - math.exp(-1.0 / (0.003 * self.sr))
-            g_rel = 1.0 - math.exp(-1.0 / (0.16 * self.sr))
-            gc = g_atk if target > self.gr else g_rel
+            gc = coeff(0.003) if target > self.gr else coeff(0.22)
             self.gr += gc * (target - self.gr)
             gain *= self.gr
             self.gate_open = self.gr > 0.6
@@ -247,9 +264,7 @@ class VoiceChain:
             thresh_db = -24.0 + 12.0 * (1.0 - s.comp_amount)
             ratio = 1.5 + 2.5 * s.comp_amount
             thresh = db_to_lin(thresh_db)
-            c_atk = 1.0 - math.exp(-1.0 / (0.008 * self.sr))
-            c_rel = 1.0 - math.exp(-1.0 / (0.09 * self.sr))
-            cc = c_atk if self.env > self.comp_env else c_rel
+            cc = coeff(0.008) if self.env > self.comp_env else coeff(0.09)
             self.comp_env += cc * (self.env - self.comp_env)
             if self.comp_env > thresh:
                 over_db = lin_to_db(self.comp_env) - thresh_db

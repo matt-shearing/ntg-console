@@ -8,6 +8,7 @@ and link send monitors → virtual inputs.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -63,6 +64,7 @@ def ensure() -> VirtualMic:
             f"sink_name={SEND_NAME}",
             "channel_map=front-left,front-right",
             "rate=48000",
+            "sink_properties=node.always-process=true",
         ]
     )
     src_id = _run(
@@ -73,10 +75,11 @@ def ensure() -> VirtualMic:
             "media.class=Audio/Source/Virtual",
             f"sink_name={SOURCE_NAME}",
             "channel_map=front-left,front-right",
+            "sink_properties=node.description=NTG_Console node.nick=NTG_Console node.always-process=true device.icon_name=audio-input-microphone",
         ]
     )
     # Give PipeWire a beat to publish ports before linking.
-    for _ in range(10):
+    for _ in range(20):
         ports = _run(["pw-link", "-io"])
         if f"{SOURCE_NAME}:input_FL" in ports and f"{SEND_NAME}:monitor_FL" in ports:
             break
@@ -107,3 +110,32 @@ def unload() -> None:
 
 def set_default_source(name: str) -> None:
     _run(["pactl", "set-default-source", name])
+
+
+def pin_playback(sink_name: str = SEND_NAME) -> int:
+    """Move this process's Pulse playback onto the internal send sink.
+
+    PortAudio often ignores PULSE_SINK and lands on the default speakers,
+    which sounds like a live monitor. We never change the default sink.
+    """
+    pid = str(os.getpid())
+    moved = 0
+    current = None
+    app = ""
+    proc = ""
+    for line in _run(["pactl", "list", "sink-inputs"]).splitlines():
+        if line.startswith("Sink Input #"):
+            if current and proc == pid and "python" in app.lower():
+                _run(["pactl", "move-sink-input", current, sink_name])
+                moved += 1
+            current = line.split("#", 1)[1].strip()
+            app = ""
+            proc = ""
+        elif "application.name" in line:
+            app = line
+        elif "application.process.id" in line:
+            proc = line.split("=", 1)[-1].strip().strip('"')
+    if current and proc == pid and "python" in app.lower():
+        _run(["pactl", "move-sink-input", current, sink_name])
+        moved += 1
+    return moved

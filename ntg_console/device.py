@@ -16,6 +16,25 @@ NTG_SINK = (
 )
 CARD = "NTG"
 
+# RØDE Central marketing version. USB bcdDevice 1.20 is firmware 1.2.0.
+LATEST_FIRMWARE = "2.1.3"
+
+# Browsers and call apps that should hear NTG_Console, not the raw shotgun.
+CALL_APP_NEEDLES = (
+    "chromium",
+    "chrome",
+    "brave",
+    "firefox",
+    "zoom",
+    "discord",
+    "slack",
+    "teams",
+    "gather",
+    "workadventure",
+    "element",
+    "signal",
+)
+
 
 def _run(cmd: list[str]) -> str:
     try:
@@ -125,3 +144,106 @@ def set_direct_monitor(on: bool) -> None:
 
 def set_source_mute(source: str, on: bool) -> None:
     _run(["pactl", "set-source-mute", source, "1" if on else "0"])
+
+
+def firmware_tuple(fw: str) -> tuple[int, int, int]:
+    """Parse a USB bcdDevice ('1.20') or marketing version ('2.1.3')."""
+    parts: list[int] = []
+    for piece in fw.lower().lstrip("v").split("."):
+        try:
+            parts.append(int(piece, 10))
+        except ValueError:
+            parts.append(0)
+    if len(parts) == 2 and parts[1] >= 10:
+        minor = parts[1]
+        parts = [parts[0], minor // 10, minor % 10]
+    while len(parts) < 3:
+        parts.append(0)
+    return parts[0], parts[1], parts[2]
+
+
+def firmware_is_current(fw: str) -> bool:
+    return firmware_tuple(fw) >= firmware_tuple(LATEST_FIRMWARE)
+
+
+def parse_source_outputs(text: str) -> list[dict]:
+    items: list[dict] = []
+    cur: dict | None = None
+    for line in text.splitlines():
+        if line.startswith("Source Output #"):
+            if cur:
+                items.append(cur)
+            cur = {
+                "id": line.split("#", 1)[1].strip(),
+                "source_index": "",
+                "source": "",
+                "app": "",
+                "binary": "",
+                "corked": False,
+            }
+        elif cur is None:
+            continue
+        elif line.strip().startswith("Source:"):
+            cur["source_index"] = line.split(":", 1)[1].strip().split()[0]
+        elif "application.name" in line and "=" in line:
+            cur["app"] = line.split("=", 1)[-1].strip().strip('"')
+        elif "application.process.binary" in line and "=" in line:
+            cur["binary"] = line.split("=", 1)[-1].strip().strip('"')
+        elif "pulse.corked" in line:
+            cur["corked"] = "true" in line.lower()
+    if cur:
+        items.append(cur)
+    return items
+
+
+def parse_short_sources(text: str) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            names[parts[0]] = parts[1]
+    return names
+
+
+def is_call_app(item: dict) -> bool:
+    blob = f"{item.get('app', '')} {item.get('binary', '')}".lower()
+    if "python" in blob:
+        return False
+    return any(needle in blob for needle in CALL_APP_NEEDLES)
+
+
+def list_source_outputs() -> list[dict]:
+    items = parse_source_outputs(_run(["pactl", "list", "source-outputs"]))
+    names = parse_short_sources(_run(["pactl", "list", "short", "sources"]))
+    for item in items:
+        item["source"] = names.get(item["source_index"], "")
+    return items
+
+
+def apps_on_source(source_name: str, outputs: list[dict] | None = None) -> list[str]:
+    if not source_name:
+        return []
+    rows = outputs if outputs is not None else list_source_outputs()
+    names: list[str] = []
+    for item in rows:
+        if item.get("source") != source_name:
+            continue
+        if "python" in f"{item.get('app', '')} {item.get('binary', '')}".lower():
+            continue
+        names.append(item.get("app") or item.get("binary") or item["id"])
+    return names
+
+
+def steer_call_apps(raw_source: str, virtual_source: str) -> list[str]:
+    """Move Chromium / Zoom / etc. off the raw NTG onto NTG_Console."""
+    if not raw_source or raw_source == virtual_source:
+        return []
+    moved: list[str] = []
+    for item in list_source_outputs():
+        if not is_call_app(item):
+            continue
+        if item.get("source") != raw_source:
+            continue
+        _run(["pactl", "move-source-output", item["id"], virtual_source])
+        moved.append(item.get("app") or item.get("binary") or item["id"])
+    return moved

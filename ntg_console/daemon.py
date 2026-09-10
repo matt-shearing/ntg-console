@@ -1,7 +1,9 @@
 """Headless engine: keeps NTG_Console alive without the GUI.
 
-Never touches the system default source or sink. Routing stays whatever
-the user last chose (headset while walking, NTG_Console when they pick it).
+Never touches the default sink (headset / speakers stay put). The default
+*source* is NTG_Console while the shotgun is plugged in, because Gather and
+Chromium otherwise open the raw stereo NTG and Chromium's AGC writes the USB
+gain. Turn that off with the USE AS DEFAULT chip.
 """
 
 from __future__ import annotations
@@ -18,8 +20,6 @@ from .engine import Engine
 from .ipc import serve
 from .settings import load, save, to_dsp
 
-# Do not import or call virtual.set_default_source from this module.
-
 
 class Daemon:
     def __init__(self) -> None:
@@ -32,22 +32,38 @@ class Daemon:
     def start_graph(self) -> None:
         info = device.poll()
         self.virt = virtual.ensure()
-        if self.data.get("lock_usb", True) and info.connected:
-            device.set_usb_gain_db(0)
+        self._apply_routing(info)
         self.engine.update(**to_dsp(self.data).__dict__)
         if info.connected:
             self.engine.start(info.source_name, self.virt.sink_name)
+
+    def _apply_routing(self, info: device.DeviceInfo) -> None:
+        """Keep USB gain, default source, and call-app capture on the rails.
+
+        Chromium's WebRTC AGC writes the hardware USB volume on the raw NTG.
+        Gather then sounds like the shotgun is pumping and going omnidirectional.
+        Re-asserting every watch tick is the whole defence.
+        """
+        if not info.connected:
+            return
+        if self.data.get("lock_usb", True):
+            device.set_usb_gain_db(0)
+        if self.data.get("claim_default", True):
+            virtual.set_default_source(virtual.SOURCE_NAME)
+        if self.data.get("steer_apps", True):
+            device.steer_call_apps(info.source_name, virtual.SOURCE_NAME)
 
     def _watch(self) -> None:
         while not self.stop.is_set():
             virtual.relink()
             info = device.poll()
+            virtual.pin_playback(virtual.SEND_NAME)
+            with self.lock:
+                self._apply_routing(info)
             if info.connected and not self.engine.meters.running:
                 try:
                     if self.virt is None:
                         self.virt = virtual.ensure()
-                    if self.data.get("lock_usb", True):
-                        device.set_usb_gain_db(0)
                     self.engine.start(info.source_name, self.virt.sink_name)
                 except Exception:
                     pass
@@ -66,8 +82,7 @@ class Daemon:
                 self.data.update(patch)
                 save(self.data)
                 self.engine.update(**to_dsp(self.data).__dict__)
-                if self.data.get("lock_usb", True):
-                    device.set_usb_gain_db(0)
+                self._apply_routing(device.poll())
             return {"ok": True}
         if cmd == "meters":
             m = self.engine.meters
@@ -78,26 +93,42 @@ class Daemon:
                 "in_rms": m.in_rms,
                 "out_peak": m.out_peak,
                 "out_rms": m.out_rms,
+                "left_rms": m.left_rms,
+                "right_rms": m.right_rms,
                 "gate_open": m.gate_open,
                 "gr_db": m.gr_db,
+                "safety_on": m.safety_on,
+                "safety_db": m.safety_db,
                 "clip": m.clip,
                 "error": m.error,
                 "in_peak_db": lin_to_db(m.in_peak),
                 "out_peak_db": lin_to_db(m.out_peak),
                 "in_rms_db": lin_to_db(m.in_rms),
                 "out_rms_db": lin_to_db(m.out_rms),
+                "left_rms_db": lin_to_db(m.left_rms),
+                "right_rms_db": lin_to_db(m.right_rms),
             }
         if cmd == "status":
             info = device.poll()
+            outputs = device.list_source_outputs()
+            m = self.engine.meters
             return {
                 "ok": True,
-                "running": self.engine.meters.running,
+                "running": m.running,
                 "connected": info.connected,
                 "serial": info.serial,
                 "firmware": info.firmware,
+                "firmware_latest": device.LATEST_FIRMWARE,
+                "firmware_ok": device.firmware_is_current(info.firmware),
                 "usb_gain_db": info.usb_gain_db,
                 "source_name": virtual.SOURCE_NAME,
-                "error": self.engine.meters.error,
+                "raw_source": info.source_name,
+                "default_source": info.default_source,
+                "raw_apps": device.apps_on_source(info.source_name, outputs),
+                "virt_apps": device.apps_on_source(virtual.SOURCE_NAME, outputs),
+                "safety_on": m.safety_on,
+                "safety_db": m.safety_db,
+                "error": m.error,
             }
         if cmd == "record_start":
             self.engine.start_record()

@@ -1,6 +1,6 @@
 [project]
 name = "ntg-console"
-version = "0.1.0"
+version = "0.2.0"
 description = "Linux mixer and virtual mic for the RØDE VideoMic NTG"
 readme = "README.md"
 license = { file = "LICENSE" }

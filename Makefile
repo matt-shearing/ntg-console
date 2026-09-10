@@ -8,7 +8,10 @@ LICDIR  := $(DESTDIR)$(PREFIX)/share/licenses/ntg-console
 UDEVDIR := $(DESTDIR)$(PREFIX)/lib/udev/rules.d
 UNITDIR := $(DESTDIR)$(PREFIX)/lib/systemd/user
 
-.PHONY: install uninstall
+.PHONY: install uninstall test
+
+test:
+	PYTHONPATH=. python3 -m unittest discover -s tests -v
 
 install:
 	install -d "$(DATADIR)/ntg_console" "$(BINDIR)" "$(APPDIR)" "$(LICDIR)" "$(UNITDIR)"

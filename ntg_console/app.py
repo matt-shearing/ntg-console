@@ -34,7 +34,7 @@ PRESETS = {
         "hf_boost": False,
         "gate": True,
         "gate_threshold_db": -42.0,
-        "comp": True,
+        "comp": False,
         "comp_amount": 0.55,
         "bottom": False,
         "bottom_amount": 0.35,
@@ -285,6 +285,12 @@ class Console(QMainWindow):
         self.lock_btn = Chip("LOCK 0 dB")
         self.lock_btn.setChecked(True)
         self.lock_btn.toggled.connect(self._on_lock)
+        self.default_btn = Chip("USE AS DEFAULT")
+        self.default_btn.setChecked(True)
+        self.default_btn.toggled.connect(self._push)
+        self.steer_btn = Chip("STEER CALL APPS")
+        self.steer_btn.setChecked(True)
+        self.steer_btn.toggled.connect(self._push)
         hg.addWidget(QLabel("USB capture"), 0, 0)
         hg.addWidget(self.usb_s, 0, 1)
         hg.addWidget(self.lock_btn, 0, 2)
@@ -294,6 +300,13 @@ class Console(QMainWindow):
         hg.addWidget(QLabel("NTG 3.5 mm"), 1, 0)
         hg.addWidget(self.jack_s, 1, 1)
         hg.addWidget(self.direct_btn, 1, 2)
+        route = QHBoxLayout()
+        route.addWidget(self.default_btn)
+        route.addWidget(self.steer_btn)
+        route.addStretch(1)
+        route_w = QWidget()
+        route_w.setLayout(route)
+        hg.addWidget(route_w, 2, 0, 1, 3)
         self.usb_s.valueChanged.connect(self._on_usb)
         self.jack_s.valueChanged.connect(self._on_jack)
         right.addWidget(hw)
@@ -449,6 +462,8 @@ class Console(QMainWindow):
             "fader_db": float(self.fader.value()),
             "mute": self.mute_btn.isChecked(),
             "lock_usb": self.lock_btn.isChecked(),
+            "claim_default": self.default_btn.isChecked(),
+            "steer_apps": self.steer_btn.isChecked(),
         }
         save_settings(patch)
         try:
@@ -488,13 +503,45 @@ class Console(QMainWindow):
     def _refresh_device(self) -> None:
         info = device.poll()
         self.info = info
+        try:
+            st = self.client.request({"cmd": "status"}, timeout=0.4)
+        except OSError:
+            st = {}
+        fw = st.get("firmware") or info.firmware
         if info.connected:
+            if st.get("firmware_ok") is False or (
+                fw and not device.firmware_is_current(fw)
+            ):
+                fw_bit = (
+                    f"firmware {fw} (RØDE latest {device.LATEST_FIRMWARE})"
+                )
+            else:
+                fw_bit = f"USB {fw}"
             self.dev_lbl.setText(
-                f"RØDE VideoMic NTG  ·  {info.serial}  ·  USB {info.firmware}  ·  "
+                f"RØDE VideoMic NTG  ·  {info.serial}  ·  {fw_bit}  ·  "
                 f"capture {info.usb_gain_db:+.0f} dB"
             )
         else:
             self.dev_lbl.setText("Microphone not found — plug the NTG in over USB-C.")
+            return
+        bits: list[str] = []
+        if st.get("safety_on"):
+            bits.append(
+                "Safety channel looks on — cycle the dB button until both LEDs are off."
+            )
+        raw_apps = st.get("raw_apps") or []
+        if raw_apps:
+            bits.append(
+                "Call apps were on the raw NTG; moving them to NTG_Console."
+            )
+        default = st.get("default_source") or info.default_source
+        if "VideoMic_NTG" in default and "NTG_Console" not in default:
+            bits.append("System default is still the raw shotgun, not NTG_Console.")
+        virt_apps = st.get("virt_apps") or []
+        if virt_apps:
+            bits.append("On NTG_Console: " + ", ".join(virt_apps) + ".")
+        if bits:
+            self.status.setText(" ".join(bits))
 
     def _tick(self) -> None:
         try:
@@ -573,6 +620,8 @@ class Console(QMainWindow):
         self.excite_s.setValue(int(float(data.get("excite_amount", 0.3)) * 100))
         self.fader.setValue(int(data.get("fader_db", 0)))
         self.lock_btn.setChecked(bool(data.get("lock_usb", True)))
+        self.default_btn.setChecked(bool(data.get("claim_default", True)))
+        self.steer_btn.setChecked(bool(data.get("steer_apps", True)))
         self._building = False
         self._push()
 

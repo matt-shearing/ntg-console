@@ -10,7 +10,9 @@ Type=simple
 ExecStart=@BINDIR@/ntg-console daemon
 Restart=on-failure
 RestartSec=2
-# Never claim default source/sink — the user picks NTG_Console when they want it.
+Environment=PULSE_SINK=ntg_send
+# Playback never claims the default sink. Capture default is NTG_Console while
+# the shotgun is plugged in (see claim_default in settings).
 
 [Install]
 WantedBy=default.target

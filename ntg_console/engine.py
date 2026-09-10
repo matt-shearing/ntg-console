@@ -10,10 +10,10 @@ from dataclasses import dataclass
 import numpy as np
 import sounddevice as sd
 
-from .dsp import DSPSettings, VoiceChain
+from .dsp import DSPSettings, VoiceChain, safety_channel_db, safety_channel_likely
 
 SAMPLE_RATE = 48000
-BLOCK = 256
+BLOCK = 512
 CHANNELS = 2
 
 
@@ -23,8 +23,12 @@ class Meters:
     in_rms: float = 1e-12
     out_peak: float = 1e-12
     out_rms: float = 1e-12
+    left_rms: float = 1e-12
+    right_rms: float = 1e-12
     gate_open: bool = False
     gr_db: float = 0.0
+    safety_on: bool = False
+    safety_db: float = 0.0
     clip: bool = False
     running: bool = False
     error: str = ""
@@ -105,6 +109,9 @@ class Engine:
             )
             inn.start()
             out.start()
+            from . import virtual as virt
+
+            virt.pin_playback(self.sink_name)
             self.meters.running = True
             hold_in = 1e-12
             hold_out = 1e-12
@@ -118,6 +125,10 @@ class Engine:
                 peak_out = float(np.max(np.abs(y))) + 1e-12
                 rms_in = float(np.sqrt(np.mean(block.astype(np.float64) ** 2))) + 1e-12
                 rms_out = float(np.sqrt(np.mean(y.astype(np.float64) ** 2))) + 1e-12
+                left = block[:, 0] if block.ndim > 1 else block
+                right = block[:, 1] if block.ndim > 1 and block.shape[1] > 1 else left
+                left_rms = float(np.sqrt(np.mean(left.astype(np.float64) ** 2))) + 1e-12
+                right_rms = float(np.sqrt(np.mean(right.astype(np.float64) ** 2))) + 1e-12
                 hold_in = max(peak_in, hold_in * 0.92)
                 hold_out = max(peak_out, hold_out * 0.92)
                 m = self.meters
@@ -125,6 +136,10 @@ class Engine:
                 m.in_rms = rms_in
                 m.out_peak = hold_out
                 m.out_rms = rms_out
+                m.left_rms = left_rms
+                m.right_rms = right_rms
+                m.safety_db = safety_channel_db(left_rms, right_rms)
+                m.safety_on = safety_channel_likely(left_rms, right_rms)
                 m.gate_open = chain.gate_open
                 m.gr_db = chain.gr_db
                 m.clip = peak_in >= 0.99 or peak_out >= 0.99
