@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 NTG_VENDOR = 0x19F7
 NTG_PRODUCT = 0x001A
@@ -128,17 +129,32 @@ def poll() -> DeviceInfo:
     )
 
 
+def _card_is_ntg() -> bool:
+    """Refuse to touch any mixer that is not the VideoMic NTG."""
+    try:
+        text = Path("/proc/asound/cards").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(f"[{CARD}" in line and "VideoMic" in line for line in text.splitlines())
+
+
 def set_usb_gain_db(db: float) -> None:
+    if not _card_is_ntg():
+        return
     db = max(0.0, min(24.0, float(db)))
     _run(["amixer", "-c", CARD, "-q", "sset", "Mic", f"{db:.0f}dB"])
 
 
 def set_jack_db(db: float) -> None:
+    if not _card_is_ntg():
+        return
     db = max(-60.0, min(0.0, float(db)))
     _run(["amixer", "-c", CARD, "-q", "sset", "PCM", f"{db:.0f}dB"])
 
 
 def set_direct_monitor(on: bool) -> None:
+    if not _card_is_ntg():
+        return
     _run(["amixer", "-c", CARD, "-q", "sset", "Mic", "Playback", "on" if on else "off"])
 
 
