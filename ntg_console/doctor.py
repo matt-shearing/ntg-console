@@ -126,15 +126,6 @@ def report() -> str:
     )
     lines.append(f"    gate {data.get('gate')}  RNNoise {data.get('suppress')}  "
                  f"HPF {data.get('hpf_hz')} Hz")
-
-    if info.is_default_source and virt not in (default or ""):
-        lines.append(
-            _line(
-                False,
-                "Gather will hear the raw stereo NTG. Chromium then writes the USB "
-                "volume slider, which is why level and directionality wander.",
-            )
-        )
     return "\n".join(lines) + "\n"
 
 
