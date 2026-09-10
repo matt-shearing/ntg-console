@@ -24,8 +24,8 @@ class MigrateTests(unittest.TestCase):
             }
         )
         self.assertFalse(data["comp"])
-        self.assertTrue(data["claim_default"])
-        self.assertTrue(data["steer_apps"])
+        self.assertFalse(data["claim_default"])
+        self.assertFalse(data["steer_apps"])
         self.assertEqual(data["settings_version"], SETTINGS_VERSION)
 
     def test_custom_compressor_is_kept(self) -> None:
@@ -45,15 +45,30 @@ class MigrateTests(unittest.TestCase):
         self.assertTrue(data["comp"])
         self.assertEqual(data["settings_version"], SETTINGS_VERSION)
 
-    def test_v2_is_left_alone(self) -> None:
+    def test_v3_is_left_alone(self) -> None:
         data = migrate(
             {
                 "comp": True,
                 "comp_amount": 0.55,
+                "claim_default": True,
                 "settings_version": SETTINGS_VERSION,
             }
         )
         self.assertTrue(data["comp"])
+        self.assertTrue(data["claim_default"])
+
+    def test_v2_claim_default_is_turned_off(self) -> None:
+        data = migrate(
+            {
+                "comp": False,
+                "claim_default": True,
+                "steer_apps": True,
+                "settings_version": 2,
+            }
+        )
+        self.assertFalse(data["claim_default"])
+        self.assertFalse(data["steer_apps"])
+        self.assertEqual(data["settings_version"], SETTINGS_VERSION)
 
     def test_old_file_without_version_is_v1(self) -> None:
         data = apply_disk(
@@ -71,7 +86,7 @@ class MigrateTests(unittest.TestCase):
         )
         self.assertFalse(data["comp"])
         self.assertEqual(data["settings_version"], SETTINGS_VERSION)
-        self.assertTrue(data["claim_default"])
+        self.assertFalse(data["claim_default"])
 
 
 if __name__ == "__main__":

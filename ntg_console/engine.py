@@ -112,6 +112,7 @@ class Engine:
             from . import virtual as virt
 
             virt.pin_playback(self.sink_name)
+            virt.pin_capture(self.source_name)
             self.meters.running = True
             hold_in = 1e-12
             hold_out = 1e-12

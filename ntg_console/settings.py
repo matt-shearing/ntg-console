@@ -9,7 +9,7 @@ from .dsp import DSPSettings
 
 CONFIG = Path.home() / ".config" / "ntg-console" / "settings.json"
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 DEFAULTS: dict = {
     "hpf_hz": 75,
@@ -27,8 +27,8 @@ DEFAULTS: dict = {
     "fader_db": 0,
     "mute": False,
     "lock_usb": True,
-    "claim_default": True,
-    "steer_apps": True,
+    "claim_default": False,
+    "steer_apps": False,
     "settings_version": SETTINGS_VERSION,
 }
 
@@ -51,14 +51,15 @@ def _looks_like_stock_calls(data: dict) -> bool:
 
 
 def migrate(data: dict) -> dict:
-    """v2: Calls no longer runs a compressor (it flattens the shotgun)."""
+    """v2: Calls drops the compressor. v3: never steal the default source."""
     version = int(data.get("settings_version") or 1)
     if version >= SETTINGS_VERSION:
         return data
-    if _looks_like_stock_calls(data):
+    if version < 2 and _looks_like_stock_calls(data):
         data["comp"] = False
-    data.setdefault("claim_default", True)
-    data.setdefault("steer_apps", True)
+    # v3 undoes the v2 default-source grab. It fought the desktop picker.
+    data["claim_default"] = False
+    data["steer_apps"] = False
     data["settings_version"] = SETTINGS_VERSION
     return data
 

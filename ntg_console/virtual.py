@@ -112,6 +112,37 @@ def set_default_source(name: str) -> None:
     _run(["pactl", "set-default-source", name])
 
 
+def pin_capture(source_name: str) -> int:
+    """Keep this process capturing the hardware NTG, not NTG_Console.
+
+    PortAudio follows the Pulse default source. If that default is NTG_Console,
+    the engine records its own output and every app on NTG_Console goes silent.
+    """
+    if not source_name:
+        return 0
+    pid = str(os.getpid())
+    moved = 0
+    current = None
+    app = ""
+    proc = ""
+    for line in _run(["pactl", "list", "source-outputs"]).splitlines():
+        if line.startswith("Source Output #"):
+            if current and proc == pid and "python" in app.lower():
+                _run(["pactl", "move-source-output", current, source_name])
+                moved += 1
+            current = line.split("#", 1)[1].strip()
+            app = ""
+            proc = ""
+        elif "application.name" in line:
+            app = line
+        elif "application.process.id" in line:
+            proc = line.split("=", 1)[-1].strip().strip('"')
+    if current and proc == pid and "python" in app.lower():
+        _run(["pactl", "move-source-output", current, source_name])
+        moved += 1
+    return moved
+
+
 def pin_playback(sink_name: str = SEND_NAME) -> int:
     """Move this process's Pulse playback onto the internal send sink.
 

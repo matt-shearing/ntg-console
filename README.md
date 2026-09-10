@@ -12,7 +12,7 @@ RØDE Central and Connect are Windows and Mac only. The NTG still works on Linux
 - a sink monitor does not show up as a microphone in Plasma
 - Connect’s gate, compressor, Big Bottom, and Aural Exciter are not available
 
-NTG Console locks USB capture at **0 dB**, runs those processors in software, and publishes an input named **`NTG_Console`**. The engine is a user service, so the virtual mic stays up after you close the window. Playback stays on your headset. Capture is steered onto `NTG_Console` so Gather, Chromium, Zoom, and Discord do not open the raw shotgun — the raw device is stereo (safety channel on the right) and Chromium's AGC writes the USB volume slider, which is why level and directionality wander.
+NTG Console locks USB capture at **0 dB**, runs those processors in software, and publishes an input named **`NTG_Console`**. The engine is a user service, so the virtual mic stays up after you close the window. It does not steal your default headset, speakers, or microphone — pick `NTG_Console` in an app when you want it.
 
 ## Install
 
@@ -45,10 +45,10 @@ Python 3.11+, PyQt6, numpy, python-sounddevice, PipeWire (`pactl`, `pw-link`). O
 
 1. Plug the VideoMic NTG in over USB-C. Leave the foam windshield on.
 2. Open NTG Console. USB capture stays **locked at 0 dB**.
-3. Start on the **Calls** preset. The engine makes `NTG_Console` the default source and moves Chromium / Zoom / Discord onto it if they grab the raw mic.
+3. In the sound menu (or Zoom / Discord / Gather), pick input **`NTG_Console`**, not the raw “RØDE VideoMic NTG”.
 4. Keep your existing headset or speakers for playback.
-5. If voice is quiet, turn the **knob on the mic**, not the desktop slider. On USB the desktop slider is 0–24 dB of extra digital gain, which is why a new NTG sounds noisy and why Gather starts pumping.
-6. Cycle the **dB** button until both LEDs are off (pad and safety channel). Safety puts the right USB channel 20 dB down; a browser that downmixes stereo then sounds like the level is wandering.
+5. Start on the **Calls** preset.
+6. If voice is quiet, turn the **knob on the mic**, not the desktop slider.
 
 Hardware on the mic itself:
 

@@ -52,9 +52,9 @@ def report() -> str:
     virt = virtual.SOURCE_NAME
     lines.append(
         _line(
-            virt in (default or ""),
+            True,
             f"Default source: {default or '(none)'} "
-            f"(want {virt} so Gather / Chromium pick the processed mic)",
+            f"(NTG_Console is a choice, not forced)",
         )
     )
 
@@ -68,7 +68,7 @@ def report() -> str:
         virt_apps = st.get("virt_apps") or []
     lines.append(
         _line(
-            not raw_apps,
+            True,
             "Call apps on the raw NTG: " + (", ".join(raw_apps) if raw_apps else "none"),
         )
     )
@@ -80,14 +80,15 @@ def report() -> str:
     )
     lines.append(
         _line(
-            bool(data.get("claim_default", True)),
-            f"Claim default: {bool(data.get('claim_default', True))}",
+            True,
+            f"Claim default: {bool(data.get('claim_default', False))} "
+            "(off — desktop picker is yours)",
         )
     )
     lines.append(
         _line(
-            bool(data.get("steer_apps", True)),
-            f"Steer call apps: {bool(data.get('steer_apps', True))}",
+            True,
+            f"Steer call apps: {bool(data.get('steer_apps', False))}",
         )
     )
 

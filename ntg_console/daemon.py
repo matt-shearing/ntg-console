@@ -1,9 +1,7 @@
 """Headless engine: keeps NTG_Console alive without the GUI.
 
-Never touches the default sink (headset / speakers stay put). The default
-*source* is NTG_Console while the shotgun is plugged in, because Gather and
-Chromium otherwise open the raw stereo NTG and Chromium's AGC writes the USB
-gain. Turn that off with the USE AS DEFAULT chip.
+Never touches the system default source or sink. The user picks a microphone
+in the desktop picker or in Gather; this process only feeds NTG_Console.
 """
 
 from __future__ import annotations
@@ -38,26 +36,22 @@ class Daemon:
             self.engine.start(info.source_name, self.virt.sink_name)
 
     def _apply_routing(self, info: device.DeviceInfo) -> None:
-        """Keep USB gain, default source, and call-app capture on the rails.
+        """Lock USB gain and keep *this process* on the hardware NTG.
 
-        Chromium's WebRTC AGC writes the hardware USB volume on the raw NTG.
-        Gather then sounds like the shotgun is pumping and going omnidirectional.
-        Re-asserting every watch tick is the whole defence.
+        Do not change the default source or move other apps. Doing that every
+        tick made the desktop mic picker snap back to NTG_Console and go silent.
         """
         if not info.connected:
             return
         if self.data.get("lock_usb", True):
             device.set_usb_gain_db(0)
-        if self.data.get("claim_default", True):
-            virtual.set_default_source(virtual.SOURCE_NAME)
-        if self.data.get("steer_apps", True):
-            device.steer_call_apps(info.source_name, virtual.SOURCE_NAME)
+        virtual.pin_capture(info.source_name)
+        virtual.pin_playback(virtual.SEND_NAME)
 
     def _watch(self) -> None:
         while not self.stop.is_set():
             virtual.relink()
             info = device.poll()
-            virtual.pin_playback(virtual.SEND_NAME)
             with self.lock:
                 self._apply_routing(info)
             if info.connected and not self.engine.meters.running:
@@ -82,7 +76,13 @@ class Daemon:
                 self.data.update(patch)
                 save(self.data)
                 self.engine.update(**to_dsp(self.data).__dict__)
-                self._apply_routing(device.poll())
+                info = device.poll()
+                self._apply_routing(info)
+                # One-shot only — never in the watch loop, or the picker fights you.
+                if patch.get("claim_default"):
+                    virtual.set_default_source(virtual.SOURCE_NAME)
+                if patch.get("steer_apps") and info.connected:
+                    device.steer_call_apps(info.source_name, virtual.SOURCE_NAME)
             return {"ok": True}
         if cmd == "meters":
             m = self.engine.meters
